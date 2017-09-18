@@ -38,11 +38,22 @@ class Tasklist(threading.Thread):
         """
         self.generate_tasklist()
         # Comms with the main thread -- send back final information
-        self.queue.put(("complete", self.tasklist))
+        self.queue.put(("tasklist", self.tasklist))
 
     def generate_tasklist(self):
-        if self.queue.empty():
-            self.queue.put(("working"))
+        """Invokes the windows tasklist command and returns a CSV-formatted
+        list of currently running tasks. Then, parses the formatted tasklist
+        into a list of dictionaries.
+        """
+        tasklist_process = subprocess.run(["tasklist", "/fo", "CSV", "/v"],
+                                          encoding="UTF-8",
+                                          stdout=subprocess.PIPE)
+        tasklist_process.check_returncode()
+        tasklist = tasklist_process.stdout.split("\n")
+        self.tasklist = [
+            {k: v for k, v in row.items()}
+            for row in csv.DictReader(tasklist, skipinitialspace=True)
+        ]
 
 
 def main():
@@ -69,8 +80,8 @@ def loop(screen, args=None):
     window = curses.newwin(int(curses.LINES - 2), int(curses.COLS - 2), 1, 1)
     window.box()
 
-    queue = queue.Queue()
-    tasklist = Tasklist(queue)
+    q = queue.Queue()
+    tasklist = Tasklist(q)
     tasklist.start()
 
     while True:
@@ -83,6 +94,11 @@ def loop(screen, args=None):
         input_code = screen.getch()
         if input_code == ord("q"):
             break
+
+        if not q.empty():
+            item = q.get(False)
+            logging.info(item)
+            if item[0] == "tasklist":
 
         tasks = get_tasklist()
         tasks = convert_cpu_time_to_percentage(tasks)
@@ -119,23 +135,6 @@ def loop(screen, args=None):
         screen.refresh()
         window.refresh()
         time.sleep(1)
-
-
-def get_tasklist():
-    """Invokes the windows tasklist command and returns a CSV-formatted list
-    of currently running tasks. Then, parses the CSV-formatted tasklist into
-    a list of dictionaries.
-    """
-    tasklist_process = subprocess.run(["tasklist", "/fo", "CSV", "/v"],
-                                      encoding="UTF-8",
-                                      stdout=subprocess.PIPE)
-    tasklist_process.check_returncode()
-    tasklist = tasklist_process.stdout.split("\n")
-    tasks = [
-        {k: v for k, v in row.items()}
-        for row in csv.DictReader(tasklist, skipinitialspace=True)
-    ]
-    return tasks
 
 
 def sort_tasklist_by_mem_usage(tasks):
