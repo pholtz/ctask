@@ -1,1 +1,1 @@
-# wmicli
+# System Information & Processes
